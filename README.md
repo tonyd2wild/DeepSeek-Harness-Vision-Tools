@@ -163,6 +163,25 @@ call. Nothing about your model deployment changes.
 
 ---
 
+## On DGX Spark? Put the eyes on the same box
+
+If your text brain runs on a DGX Spark (or two, the way DeepSeek V4 Flash
+typically does), you usually do **not** need a separate machine for the eyes. The
+`fast` vision model is featherweight, roughly **2 to 3 GB live**, so it fits
+**alongside the brain on the same Spark**. Point the proxy's `--vision-url` (or the
+tool's backend) at `127.0.0.1` and the whole thing, brain and eyes, runs on one
+piece of hardware. Simpler than splitting the two across boxes.
+
+⚠️ **Check real headroom first (GB10 unified memory).** On a Spark the reported
+"free" memory **overstates** what CUDA can actually use, because the GPU and CPU
+share one pool. The tiny `fast` model almost always fits; a large `detailed` VLM
+may not. Reserve memory for whatever you co-locate and confirm it serves before
+relying on it. The DGX-Spark-specific
+[ancestor repo](https://github.com/tonyd2wild/DeepSeek-v4-Flash-0731-Vision-DSpark-1M-NVFP4-KV-2x-DGX-Spark)
+walks the co-located setup end to end.
+
+---
+
 ## Honest limits
 
 Read this part. The eyes are a **description from a separate vision model, not a

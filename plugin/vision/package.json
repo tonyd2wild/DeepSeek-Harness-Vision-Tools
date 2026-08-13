@@ -1,0 +1,12 @@
+{
+  "name": "dsh-plugin-vision",
+  "version": "0.1.0",
+  "description": "analyze_image tool for the DeepSeek Harness (dsh), delegates 'seeing' to a local vision model so a text-only brain never has an image in its context.",
+  "type": "module",
+  "main": "index.js",
+  "license": "MIT",
+  "_comment_dsh_tools_link": "The npm-published @deepseek-ai/dsh-tools is an OLDER generation (0.0.1-rc.1) than the harness itself (0.1.0-rc.6) and imports a package that was never published, so installing it from npm gives you an unusable copy. Link the harness's OWN bundled copy instead. Declared as a link: dependency (not a hand-made symlink/junction) so `pnpm install` recreates it and the resolved version stays checkable. pnpm makes the symlink WITHOUT admin, the 'needs admin' problem is an artifact of mklink, not a real constraint. Replace <your-dsh-install> with the path that CONTAINS node_modules/@deepseek-ai/dsh (your global dsh install).",
+  "dependencies": {
+    "@deepseek-ai/dsh-tools": "link:<your-dsh-install>/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tools"
+  }
+}

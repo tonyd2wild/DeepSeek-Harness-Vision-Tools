@@ -1,0 +1,25 @@
+# vision-proxy.service  -  bring the vision proxy up on boot (Linux, systemd).
+#
+# Install as a USER unit (no root):
+#   mkdir -p ~/.config/systemd/user
+#   cp vision-proxy.service ~/.config/systemd/user/
+#   # edit ExecStart paths below, then:
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now vision-proxy
+#   loginctl enable-linger "$USER"     # so it runs without an active login session
+#
+# Check it:  systemctl --user status vision-proxy  /  journalctl --user -u vision-proxy -f
+
+[Unit]
+Description=dsh vision proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Edit both paths for your box (python3 and the repo's shim).
+ExecStart=/usr/bin/python3 /path/to/DeepSeek-Harness-Vision-Tools/shim/vision_shim.py --host 127.0.0.1 --port 8900
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

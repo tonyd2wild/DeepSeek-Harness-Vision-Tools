@@ -110,31 +110,49 @@ export function apply(ctx, config = {}) {
   const tool = defineTool({
     name: "analyze_image",
     description,
+    // A PROPERTY MAP, not raw JSON Schema. rc.6 compiles this itself and marks
+    // required per property; handing it `{ type: "object", properties: {...} }`
+    // makes it read "type" as a parameter NAME and fail with
+    // `parameters.type must be a value schema object`.
     parameters: {
-      type: "object",
-      properties: {
-        path: {
-          type: "string",
-          description: "Path to the image file to analyze.",
-        },
-        backend: {
-          type: "string",
-          enum: names,
-          description:
-            `Which vision backend to use. One of: ${names.join(", ")}. ` +
-            `Defaults to "${defaultBackend}".`,
-        },
-        prompt: {
-          type: "string",
-          description: "What to ask the vision model about the image.",
-          default: DEFAULT_PROMPT,
-        },
+      path: {
+        type: "string",
+        required: true,
+        description: "Path to the image file to analyze.",
       },
-      required: ["path"],
+      backend: {
+        type: "string",
+        description:
+          `Which vision backend to use. One of: ${names.join(", ")}. ` +
+          `Defaults to "${defaultBackend}".`,
+      },
+      prompt: {
+        type: "string",
+        description: "What to ask the vision model about the image.",
+      },
     },
 
     // Returns a plain STRING, the vision model's description, which becomes the
     // tool result in the brain's context. No image bytes ever reach the brain.
+    // REQUIRED. defineTool reads `options.output.render` unconditionally, so a
+    // descriptor without an `output` block throws at MOUNT:
+    //
+    //   TypeError: Cannot read properties of undefined (reading 'render')
+    //
+    // and it throws in two places that look nothing alike. Composed as a
+    // host-plane row it takes the whole harness down at boot; composed the
+    // documented way, as an agent-preset row, the harness boots clean and every
+    // NEW SESSION silently fails to create instead -- because presets mount
+    // lazily, at first session. Verified against dsh 0.1.0-rc.6.
+    //
+    // `execute` below returns a plain string, so the schema is a string and
+    // render receives that string directly. (If you change execute to return an
+    // object, this schema and render must change with it.)
+    output: {
+      schema: { type: "string" },
+      render: (_args, value) => [{ type: "text", text: value }],
+    },
+
     async execute(args = {}) {
       const filePath = args.path;
       const backendName = args.backend || defaultBackend;

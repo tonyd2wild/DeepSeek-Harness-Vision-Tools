@@ -74,6 +74,57 @@ Per-platform picks, memory numbers, and a full swap table: **[MODELS.md](MODELS.
 
 ---
 
+## Which `dsh` this is verified against
+
+**Verified: `dsh 0.1.0-rc.6`.** The plugin talks to the harness's tool registry,
+and that registry's contract has changed between generations — so the version
+matters more here than it looks.
+
+Install the matching harness rather than whatever `latest` currently points at:
+
+```sh
+npm i -g @deepseek-ai/dsh@0.1.0-rc.6
+```
+
+If you run a different generation and the tool fails to mount, the two things
+rc.6 requires of a tool descriptor are:
+
+- **`parameters` is a property map**, not raw JSON Schema. `{ path: { type:
+  "string", required: true } }` — not `{ type: "object", properties: {...} }`.
+  Getting this wrong fails with `parameters.type must be a value schema object`.
+- **`output` must exist**, with a `schema` and a `render`. `defineTool` reads
+  `options.output.render` unconditionally.
+
+---
+
+## If something goes wrong, read the BROWSER console
+
+This is the single most useful thing in this file.
+
+**A broken plugin does not necessarily break the harness at boot, and the error
+does not necessarily reach the server log.**
+
+An agent preset — the way this plugin is meant to be installed — **mounts
+lazily, at first session**. So a broken one behaves like this:
+
+| what you see | what is actually happening |
+|---|---|
+| harness starts fine, health checks pass | the preset has not mounted yet |
+| clicking **New Session** does nothing at all | the mount is failing, silently |
+| server log is empty | the error never goes there |
+| the agent starts opening your **real desktop browser** | no session means no tools, so it shells out to `open`/`start` instead |
+
+The actual error appears **only in the browser devtools console**:
+
+```
+SessionCreateError: session create failed: agent-preset-invalid:
+agent-presets: preset "<name>" failed to mount:
+failed to apply loader entry tool-vision
+```
+
+**So: a clean boot proves nothing. The test is CREATING A SESSION.** If it fails,
+open devtools before changing anything else.
+
 ## What you need
 
 | | |

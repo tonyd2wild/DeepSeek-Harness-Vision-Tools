@@ -11,6 +11,13 @@
 eyes: keep your text model as the brain, and let a local vision model do the
 *seeing*. Any text model, any vision model, on Mac or Windows/PC.**
 
+> **Requires dsh 0.2.0-rc.1 or newer.** Works in both 0.2 surfaces: the web UI
+> (profile `web`) and DeepSeek's desktop app (profile `desktop`).
+>
+> **Using dsh 0.1.x?** Use the [`dsh-0.1` tag](https://github.com/tonyd2wild/DeepSeek-Harness-Vision-Tools/tree/dsh-0.1)
+> of this repo. Its instructions (`settings.yaml`, `~/.dsh/.agent-presets/`)
+> are for 0.1.0-rc.6; 0.2 reads neither.
+
 The model driving `dsh` is usually **text-only** (DeepSeek, dense Qwen, Llama,
 Mistral). Hand it an image and `dsh` refuses before it sends, naming the model.
 Declaring `input: [text, image]` to force it through is worse: the endpoint then
@@ -74,26 +81,37 @@ Per-platform picks, memory numbers, and a full swap table: **[MODELS.md](MODELS.
 
 ---
 
-## Which `dsh` this is verified against
+## Which `dsh` this targets
 
-**Verified: `dsh 0.1.0-rc.6`.** The plugin talks to the harness's tool registry,
-and that registry's contract has changed between generations — so the version
-matters more here than it looks.
-
-Install the matching harness rather than whatever `latest` currently points at:
+**dsh 0.2.0-rc.1+.** The plugin talks to the harness's tool registry, and that
+registry's contract has changed between generations, so the version matters
+more here than it looks. At the time of writing npm's `latest` tag still points
+at 0.1.x, so install the 0.2 line explicitly:
 
 ```sh
-npm i -g @deepseek-ai/dsh@0.1.0-rc.6
+npm i -g @deepseek-ai/dsh@next
 ```
 
-If you run a different generation and the tool fails to mount, the two things
-rc.6 requires of a tool descriptor are:
+What 0.2 changed for this repo:
+
+- **No `settings.yaml`.** Model routes, the default preset, and every plugin
+  row live in `$DSH_HOME/profiles/<profile>/cordis.patch.yml`.
+- **Presets are rows, not folders.** A user preset is an
+  `@deepseek-ai/dsh-agent-preset` row in that file; `~/.dsh/.agent-presets/` is
+  no longer read.
+- **Two surfaces, two profiles.** The web UI boots profile `web`, DeepSeek's
+  desktop app boots profile `desktop`. Each has its own patch file and its own
+  installed plugins.
+
+What the tool registry requires of a tool descriptor (unchanged from 0.1):
 
 - **`parameters` is a property map**, not raw JSON Schema. `{ path: { type:
-  "string", required: true } }` — not `{ type: "object", properties: {...} }`.
+  "string", required: true } }`, not `{ type: "object", properties: {...} }`.
   Getting this wrong fails with `parameters.type must be a value schema object`.
 - **`output` must exist**, with a `schema` and a `render`. `defineTool` reads
   `options.output.render` unconditionally.
+- **Every service the plugin reads off `ctx` must be declared in `inject`.**
+  Reading an undeclared one throws `cannot get property "<name>" without inject`.
 
 ---
 
@@ -114,7 +132,8 @@ lazily, at first session**. So a broken one behaves like this:
 | server log is empty | the error never goes there |
 | the agent starts opening your **real desktop browser** | no session means no tools, so it shells out to `open`/`start` instead |
 
-The actual error appears **only in the browser devtools console**:
+The actual error appears **only in the browser devtools console** (this sample
+is 0.1's wording; the exact text can differ on 0.2, the place to look does not):
 
 ```
 SessionCreateError: session create failed: agent-preset-invalid:
@@ -155,16 +174,28 @@ python3 shim/vision_shim.py --port 8900 \
   --vision-model your-fast-vlm
 ```
 
-Then add a `dsh` route whose `baseURL` is the proxy (`http://127.0.0.1:8900/v1`)
-and that declares `input: [text, image]`. The exact pi-ai provider block, plus a
-no-proxy fallback route, is in **[examples/dsh.md](examples/dsh.md)**.
+Then add a provider to the `llm-pi-ai` row of your profile's `cordis.patch.yml`
+whose `baseURL` is the proxy (`http://127.0.0.1:8900/v1`) and that declares
+`input: [text, image]`. The exact row, plus a no-proxy fallback route, is in
+**[examples/dsh.md](examples/dsh.md)**.
 
 **Door 2, the tool** (files on disk):
 
 ```bash
-cp -r plugin/vision ~/.dsh/plugins/vision   # then fix its dsh-tools link (trap 2)
-dsh plugin --profile <p> add link:~/.dsh/plugins/vision
+cp -r plugin/vision ~/.dsh/plugins/vision
+cd ~/.dsh/plugins/vision
+# link the harness's OWN dsh-tools, not the npm one (examples/dsh.md, trap 2)
+npm pkg set "dependencies.@deepseek-ai/dsh-tools=link:$(npm root -g)/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tools"
+pnpm install --ignore-scripts
+
+# once per profile you use: web = browser UI, desktop = DeepSeek's desktop app
+dsh plugin --profile web     add link:/absolute/path/to/.dsh/plugins/vision
+dsh plugin --profile desktop add link:/absolute/path/to/.dsh/plugins/vision
 ```
+
+Then add the tool to an agent-preset row in each profile's `cordis.patch.yml`
+and restart; a ready-to-adapt file is
+**[examples/cordis.patch.yml](examples/cordis.patch.yml)**.
 
 ---
 
@@ -187,20 +218,28 @@ Two independent pieces, one per door.
 **[autostart/](autostart/)**: a Windows logon `.vbs` and a Linux systemd unit.
 Edit the paths, install, done.
 
-**Tool (door 2): an upgrade-safe user preset as the default.** Model-facing tool
+**Tool (door 2): an upgrade-safe preset row as the default.** Model-facing tool
 rows are disabled at the host plane; the agent preset makes the tool visible.
-Editing the shipped `standard` preset would work until the next upgrade overwrites
-it, so instead create a USER preset with a **distinct id** (a user preset cannot
-reuse a shipped id, or it is silently shadowed) composing `web` + `analyze_image`,
-then set it as the default in `settings.yaml` (hot-reloaded):
+On 0.2 a preset is an `@deepseek-ai/dsh-agent-preset` row in
+`cordis.patch.yml`. A patch replaces a row's whole `config` and a preset is not
+a group you can append into, so you cannot add one tool to the shipped
+`standard` preset. Instead declare your OWN preset row with a **distinct id**
+(e.g. `standard-vision`) holding the shipped standard plugin list plus the
+`tool-vision` row, and make it the default:
 
 ```yaml
-agent-presets:
-  default: standard-vision
+- id: agent-preset-registry
+  config:
+    default: standard-vision
 ```
 
-Presets mount **lazily on first session**, so verify by starting a **real
-session**, not by watching a clean boot. Layout and composition details are in
+Already have a custom preset row from another community tool? Append the
+`tool-vision` row to that one instead; only one preset can be the default.
+
+Restart `dsh` (web UI: re-run `dsh web`; desktop app: quit and reopen), then
+verify by starting a **real session**, not by watching a clean boot: presets
+mount lazily. The full row is in
+**[examples/cordis.patch.yml](examples/cordis.patch.yml)**, the walkthrough in
 **[examples/dsh.md](examples/dsh.md)**.
 
 ---
@@ -271,7 +310,20 @@ actually want to think with.**
 | `EYES_URL` | `--vision-url` | `http://YOUR_FAST_VISION_HOST:8081/v1/chat/completions` | the vision endpoint |
 | `EYES_MODEL` | `--vision-model` | `your-fast-vlm` | served vision model id |
 
-**Tool** (plugin config block or env):
+**Tool** (the `config:` of its preset row, or env when the row sets none):
+
+```yaml
+- id: tool-vision
+  name: 'dsh-plugin-vision'
+  config:
+    backends:
+      fast:
+        url: http://YOUR_FAST_VISION_HOST:8081/v1/chat/completions
+        model: your-fast-vlm
+      detailed:
+        url: http://YOUR_DETAILED_VISION_HOST:8010/v1/chat/completions
+        model: your-detailed-vlm
+```
 
 | env | example | what it is |
 |---|---|---|
@@ -289,6 +341,7 @@ shim/vision_shim.py        the vision PROXY (door 1), stdlib-only, zero deps
 plugin/vision/index.js     the analyze_image TOOL (door 2)
 plugin/vision/package.json declares the dsh-tools LINK (harness copy, not npm)
 examples/dsh.md            the real dsh integration guide: both doors, pi-ai config, traps
+examples/cordis.patch.yml  the dsh 0.2 rows: proxy route, preset with analyze_image, default
 examples/AGENTS.md         copy-paste $DSH_HOME/AGENTS.md so the agent knows it isn't multimodal
 autostart/vision-proxy.vbs Windows logon autostart for the proxy
 autostart/vision-proxy.service Linux systemd unit for the proxy

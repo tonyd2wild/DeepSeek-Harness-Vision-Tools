@@ -3,6 +3,12 @@
 Everything here is model-agnostic and sanitized. Swap the placeholder hosts,
 model ids, and env names for your own.
 
+Written for **dsh 0.2.0-rc.1+**, where all configuration lives in
+`$DSH_HOME/profiles/<profile>/cordis.patch.yml` (default `$DSH_HOME` is `~/.dsh`).
+Apply every step to each profile you use: `web` for the browser UI, `desktop`
+for DeepSeek's desktop app. For dsh 0.1.x, use this repo's
+[`dsh-0.1` tag](https://github.com/tonyd2wild/DeepSeek-Harness-Vision-Tools/tree/dsh-0.1).
+
 ## The core problem
 
 You want to run `dsh` on a strong text-only model *and* be able to drop a
@@ -67,31 +73,39 @@ vision server and the proxy for you.
 
 ### 2. Point a `dsh` route at the proxy
 
-`dsh` model routes live in `$DSH_HOME/settings.yaml` under the pi-ai provider
-block. Point `baseURL` at the **proxy**, not the upstream, and declare
-`input: [text, image]`:
+`dsh` model routes are the `providers` of the `llm-pi-ai` row in your profile's
+`cordis.patch.yml`. Point `baseURL` at the **proxy**, not the upstream, and
+declare `input: [text, image]`:
 
 ```yaml
-llm-pi-ai:
-  providers:
-    vision-proxy:                        # any provider id you like
-      displayName: Your Text Model (via vision proxy)
-      apiKeyEnv: YOUR_PLACEHOLDER_KEY_ENV # any env var holding any non-empty value
-      api: openai-completions
-      baseURL: http://127.0.0.1:8900/v1   # the PROXY, not the upstream
-      models:
-        - id: your-text-model-id
-          contextWindow: 262144
-          maxTokens: 32768
-          input: [text, image]
+- id: llm-pi-ai
+  name: "@deepseek-ai/dsh-llm-pi-ai"
+  config:
+    providers:
+      vision-proxy:                        # any provider id you like
+        displayName: Your Text Model (via vision proxy)
+        apiKeyEnv: YOUR_PLACEHOLDER_KEY_ENV # any env var holding any non-empty value
+        api: openai-completions
+        baseURL: http://127.0.0.1:8900/v1   # the PROXY, not the upstream
+        models:
+          - id: your-text-model-id
+            name: Your Text Model (via vision proxy)
+            contextWindow: 262144
+            maxTokens: 32768
+            input: [text, image]
+      # ...every provider you already had stays listed here too...
 ```
+
+**A patch replaces the row's whole `config`.** If your file already has an
+`llm-pi-ai` row (an upgrade from 0.1 migrates your old `settings.yaml` routes
+into one), add the new provider to it rather than writing a second row, and
+keep every existing provider in the list.
 
 `input: [text, image]` is **true of the proxy** even though it is false of your
 brain. The route describes what it talks to, and it talks to the proxy, which
 genuinely accepts images.
 
-**Model routes hot-reload, no restart.** Save the file, pick the entry in the
-model picker, and attach an image.
+Restart `dsh`, pick the entry in the model picker, and attach an image.
 
 ### 3. Keep a no-proxy fallback route
 
@@ -100,16 +114,17 @@ the upstream with no `input` declared**, so there is always a way to work when t
 proxy is down:
 
 ```yaml
-    text-only-direct:
-      displayName: Your Text Model (direct, no vision)
-      apiKeyEnv: YOUR_PLACEHOLDER_KEY_ENV
-      api: openai-completions
-      baseURL: http://127.0.0.1:8000/v1   # the upstream itself
-      models:
-        - id: your-text-model-id
-          contextWindow: 262144
-          maxTokens: 32768
-          # no input: line -> text only, cannot be handed an image
+      text-only-direct:                    # a sibling of vision-proxy above
+        displayName: Your Text Model (direct, no vision)
+        apiKeyEnv: YOUR_PLACEHOLDER_KEY_ENV
+        api: openai-completions
+        baseURL: http://127.0.0.1:8000/v1   # the upstream itself
+        models:
+          - id: your-text-model-id
+            name: Your Text Model (direct)
+            contextWindow: 262144
+            maxTokens: 32768
+            # no input: line -> text only, cannot be handed an image
 ```
 
 ### How the proxy works
@@ -138,14 +153,21 @@ right door for files the agent already knows the path to.
 
 ### 1. Put the plugin somewhere per-profile-addable
 
-Copy `plugin/vision/` to a stable path, e.g. `~/.dsh/plugins/vision`. Edit its
-`package.json` so the `@deepseek-ai/dsh-tools` `link:` target points at your
-harness's bundled copy (see **trap 2** below for why).
+Copy `plugin/vision/` to a stable path, e.g. `~/.dsh/plugins/vision`. Point its
+`@deepseek-ai/dsh-tools` dependency at your harness's bundled copy (see
+**trap 2** below for why) and install it:
+
+```sh
+cd ~/.dsh/plugins/vision
+npm pkg set "dependencies.@deepseek-ai/dsh-tools=link:$(npm root -g)/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tools"
+pnpm install --ignore-scripts
+```
 
 ### 2. Add it PER PROFILE, never into the install's `node_modules`
 
 ```sh
-dsh plugin --profile <p> add link:~/.dsh/plugins/vision
+dsh plugin --profile web     add link:/absolute/path/to/.dsh/plugins/vision
+dsh plugin --profile desktop add link:/absolute/path/to/.dsh/plugins/vision
 ```
 
 `dsh plugin` shells out to **pnpm**, which must be installed. Plugins resolve from
@@ -155,7 +177,9 @@ the **profile directory**, not the install; dropping one into the install's
 
 ### 3. Configure the two backends
 
-Two roles, chosen per call. Set them in the plugin config block or via env:
+Two roles, chosen per call. Set them in the `config:` of the tool's preset row
+(step 4) as `backends: { fast: { url, model }, detailed: { url, model } }`, or
+via env:
 
 | backend | role | placeholder endpoint | placeholder model |
 |---|---|---|---|
@@ -174,34 +198,62 @@ model cannot read config). An **unknown backend throws and names the valid
 options**, no silent fallback, so a typo can never make `detailed` quietly answer
 from the tiny `fast` model.
 
-### 4. Make it the default with an upgrade-safe USER PRESET
+### 4. Make it the default with an upgrade-safe PRESET ROW
 
 This is the tool's "works on every session" persistence, and it survives
-`npm i -g @deepseek-ai/dsh`. On the web surface, model-facing tool rows are
-disabled at the host plane; the **agent preset** is what makes a tool visible.
-Editing the shipped `standard` preset would work until the next upgrade overwrites
-it, so instead:
+`npm i -g @deepseek-ai/dsh`. In the web UI and the desktop app, model-facing
+tool rows are disabled at the host plane; the **agent preset** is what makes a
+tool visible. On 0.2 a preset is an `@deepseek-ai/dsh-agent-preset` row in
+`cordis.patch.yml` (`~/.dsh/.agent-presets/` folders are no longer read).
 
-1. **Create a USER preset with a DISTINCT id** (e.g. `standard-vision`) composing
-   `web` + `analyze_image`. A user preset **cannot reuse a shipped id**: roots are
-   first-wins and the shipped root wins, so a user preset named `standard` is
-   silently shadowed. Give it its own id.
-
-   ```
-   ~/.dsh/.agent-presets/standard-vision/
-   ├── agent.cordis.yml     # composes web_fetch + analyze_image
-   └── preset.yml           # display name, e.g. "Standard + Vision"
-   ```
-
-2. **Set it as the default in `settings.yaml`** (hot-reloaded, no restart):
+1. **Declare your OWN preset row with a DISTINCT id** (e.g. `standard-vision`).
+   You cannot append one tool to the shipped `standard` preset: a patch
+   replaces a row's whole `config`, and a preset row is not a group you can
+   insert into. So your row holds the shipped standard plugin list, copied
+   verbatim, plus the `tool-vision` row. The shipped list is in your install at
+   `$(npm root -g)/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-app/presets/standard.patch.yml`
+   (or run `dsh --profile web --dump-default-config` and find `preset-standard`).
+   Duplicate preset ids fail to load, so do not reuse `standard`.
 
    ```yaml
-   agent-presets:
-     default: standard-vision
+   - insert:
+       - id: preset-standard-vision
+         name: '@deepseek-ai/dsh-agent-preset'
+         config:
+           id: standard-vision
+           name: Standard + Vision
+           order: 0
+           plugins:
+             # ...the shipped standard preset's plugins, unchanged...
+             - id: tool-vision
+               name: 'dsh-plugin-vision'
+               config:
+                 backends:
+                   fast:
+                     url: http://YOUR_FAST_VISION_HOST:8081/v1/chat/completions
+                     model: your-fast-vlm
+                   detailed:
+                     url: http://YOUR_DETAILED_VISION_HOST:8010/v1/chat/completions
+                     model: your-detailed-vlm
    ```
 
-> **Presets mount LAZILY, on first session** (trap 4). A clean boot proves nothing.
-> Verify by starting a **real session**.
+2. **Make it the default:**
+
+   ```yaml
+   - id: agent-preset-registry
+     config:
+       default: standard-vision
+   ```
+
+   One preset is the default, so if another community tool already gave you a
+   custom preset row, append `tool-vision` to that row instead.
+
+3. **Re-copy after upgrades.** Your row is a snapshot of the shipped standard
+   preset. When a `dsh` upgrade changes the shipped list, refresh your copy and
+   keep your tool rows at the end.
+
+> **Presets mount LAZILY, on first session** (trap 5). A clean boot proves nothing.
+> Restart `dsh`, then verify by starting a **real session**.
 
 ---
 
@@ -226,7 +278,7 @@ are in **[../autostart/](../autostart/)**:
   then `systemctl --user enable --now vision-proxy` (and `loginctl enable-linger`
   so it runs without an active login).
 
-(The tool's persistence is the user-preset-as-default above; they are independent.)
+(The tool's persistence is the preset-row-as-default above; they are independent.)
 
 ---
 
@@ -253,18 +305,27 @@ are in **[../autostart/](../autostart/)**:
    install's `node_modules` crashes **every** profile on boot with
    `ERR_MODULE_NOT_FOUND`. Always `dsh plugin --profile <p> add link:...`.
 2. **`dsh-tools` version skew.** The plugin imports `defineTool` from
-   `@deepseek-ai/dsh-tools`. The npm copy is an older generation (`0.0.1-rc.1`) than
-   the harness (`0.1.0-rc.6`) and imports a package that was never published, so it
-   is unusable. **Link the harness's own bundled copy**, declared in `package.json`,
-   not a hand-made junction, so `pnpm install` recreates it and the version stays
-   checkable.
-3. **Absolute Windows paths work in a PRESET but not in a profile patch.** The
+   `@deepseek-ai/dsh-tools`. npm's `latest` tag for that package is still an old
+   generation (`0.0.1-rc.1`) that imports a package that was never published, so a
+   plain install gives you an unusable copy, and any separately installed copy can
+   drift from the harness you actually run. **Link the harness's own bundled copy**
+   (the `npm pkg set ... link:` step above), declared in `package.json` rather than
+   a hand-made junction, so `pnpm install` recreates it and the version stays
+   checkable. Re-run `pnpm install` in the plugin folder after upgrading `dsh`.
+3. **Declare every `ctx` service you read in `inject`.** Under 0.2, reading a
+   service the plugin did not declare throws
+   `cannot get property "<name>" without inject`, and an `inject` naming a service
+   that never appears keeps the plugin from applying at all.
+4. **Absolute Windows paths work in a PRESET but not in a profile patch.** The
    preset loader converts an absolute path to a `file:` URL before import, so
    `C:/Users/.../index.js` is valid in a preset row. The **host-plane** loader does
    no such conversion; it parses `C:` as a URL scheme and dies with
    `ERR_UNSUPPORTED_ESM_URL_SCHEME`. A **bare package name works on both planes**,
    so use one on both.
-4. **Presets mount LAZILY, on first session.** Verify by starting a real session.
+5. **Presets mount LAZILY, on first session.** Verify by starting a real session.
+6. **`web` and `desktop` are separate profiles.** Each has its own
+   `cordis.patch.yml` and its own installed plugins. Wiring one does nothing for
+   the other.
 
 ---
 
@@ -272,13 +333,15 @@ are in **[../autostart/](../autostart/)**:
 
 | change | restart? |
 |---|---|
-| `settings.yaml` (model routes, default preset) | **No**, hot-reloaded |
-| preset `agent.cordis.yml` | **No**, new generation on next session (file stamp) |
+| `cordis.patch.yml` (model routes, preset rows, default preset) | **Restart `dsh`** to be sure; some rows hot-reload, a restart is the reliable test |
+| plugin added with `dsh plugin ... add` | **Yes** |
 | plugin `index.js` | **Yes**, ESM modules are cached per process |
 | the proxy itself (`vision_shim.py`) | restart the proxy process; `dsh` is unaffected |
 
-Stopping the browser tab does **not** stop the `dsh` server; kill the listener on
-its port. Same for the proxy: kill the listener on `8900`.
+Restarting means: web UI, stop the `dsh web` process and start it again (closing
+the browser tab does **not** stop the server); desktop app, quit it fully and
+reopen it. After any restart, open a **new** session. For the proxy, kill the
+listener on `8900`.
 
 ---
 

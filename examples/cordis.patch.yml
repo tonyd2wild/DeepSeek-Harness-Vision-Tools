@@ -1,0 +1,216 @@
+# Example profile patch rows for DeepSeek Harness Vision Tools (dsh 0.2.0-rc.1+).
+#
+# APPEND these rows to:  $DSH_HOME/profiles/<profile>/cordis.patch.yml
+#                        ($DSH_HOME defaults to ~/.dsh)
+# once per profile you use: `web` (browser UI) and/or `desktop` (DeepSeek's
+# desktop app). On 0.2 this file is all of your configuration (settings.yaml is
+# gone), so add to it; do not replace it.
+#
+# Rules that bite:
+#  * A patch REPLACES the targeted row's whole `config`; it never merges.
+#  * A preset row is not a group, so you cannot append one tool to the shipped
+#    `standard` preset. You declare your own preset (distinct id) holding the
+#    shipped list plus your tool rows -- that is what the block below is.
+#  * If another community tool already gave you a custom preset row, do NOT add
+#    a second one: append the tool-vision row to the existing preset instead.
+#  * Restart dsh afterwards and test by creating a NEW session (presets mount
+#    lazily; a clean boot proves nothing).
+
+# ── Door 1 (optional): a model route through the vision proxy ───────────────
+#
+# Model routes are the `providers` of the `llm-pi-ai` row. If your file already
+# has an `llm-pi-ai` row (a 0.1 -> 0.2 upgrade migrates your settings.yaml
+# routes into one), ADD `vision-proxy` to its providers -- a second row would
+# replace the first, dropping every provider it does not restate.
+#
+# - id: llm-pi-ai
+#   name: "@deepseek-ai/dsh-llm-pi-ai"
+#   config:
+#     providers:
+#       vision-proxy:
+#         displayName: Your Text Model (via vision proxy)
+#         apiKeyEnv: YOUR_PLACEHOLDER_KEY_ENV   # any env var holding any value
+#         api: openai-completions
+#         baseURL: http://127.0.0.1:8900/v1     # the PROXY, not the upstream
+#         models:
+#           - id: your-text-model-id
+#             name: Your Text Model (via vision proxy)
+#             contextWindow: 262144
+#             maxTokens: 32768
+#             input: [text, image]
+#       # ...your existing providers stay listed here...
+
+# ── Door 2: the analyze_image tool, in a preset of your own ─────────────────
+#
+# Install the plugin into the profile first:
+#   dsh plugin --profile web add link:/absolute/path/to/.dsh/plugins/vision
+- insert:
+    - id: preset-standard-vision
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: standard-vision
+        name: Standard + Vision
+        description: The shipped standard preset plus analyze_image (local vision models).
+        order: 0
+        plugins:
+          # ── BEGIN: dsh 0.2.0-rc.1 shipped `standard` preset, copied verbatim ──
+          # Source: <npm root -g>/@deepseek-ai/dsh/node_modules/@deepseek-ai/
+          #         dsh-web-app/presets/standard.patch.yml
+          # (DeepSeek Harness, MIT, Copyright (c) 2026 DeepSeek.)
+          # Refresh this block after a dsh upgrade; keep the rows below it.
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              suffix: Your working directory is {{cwd}}.
+              prefix: You are a coding agent powered by the {{model}} model.
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: tool-jobs
+            name: '@deepseek-ai/dsh-tool-jobs'
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'
+          - id: command-goal
+            name: '@deepseek-ai/dsh-command-goal'
+          - id: tool-goal
+            name: '@deepseek-ai/dsh-tool-goal'
+          - id: planning
+            name: cordis:group
+            group: true
+            isolate:
+              planMode: true
+            config:
+              - id: plan-mode
+                name: '@deepseek-ai/dsh-plan-mode'
+                config:
+                  section: |
+                    You are in plan mode. Stay in plan mode until exit_plan_mode succeeds or the user switches the session mode. Imperative language to implement changes means plan the implementation, not execute it. A user's conversational agreement — including an answer confirming something you asked — approves nothing and does not end plan mode; fold the confirmed decision into the plan and submit it through exit_plan_mode.
+
+                    Explore first. Use non-mutating reads, searches, static analysis, and checks to ground the plan in the actual repository. Do not edit or write files, change configuration, run formatters or code generation that rewrites tracked files, commit, or otherwise carry out the plan. Prefer existing functions and patterns over new machinery.
+
+                    The tool catalog stays the same across modes for request-cache stability. These plan-mode rules override any later tool description or guidance that suggests using mutation tools; those tools remain listed to keep the tool catalog unchanged. Do not use todo_write to track this planning phase: it tracks implementation after an approved plan, while the plan itself belongs in exit_plan_mode.
+
+                    Resolve discoverable facts by inspection. Use ask_user_question only for user-owned choices or material ambiguity that inspection cannot answer. Do not ask the user where code lives or how current behavior works when you can find out.
+
+                    Make the plan decision-complete: state the goal and success criteria; group implementation changes by subsystem; identify public API, schema, and data-flow changes; cover edge cases, failure modes, tests, acceptance criteria, and explicit assumptions. Keep it concise enough to review but detailed enough that another engineer can implement it without making design decisions.
+
+                    When ready, call exit_plan_mode with the complete plan markdown, starting with a # title. Make exit_plan_mode the only and final tool call in that assistant response: it presents the plan for approval, and implementation begins only in a later step after approval. Do not paste the final plan as a plain reply or ask "should I proceed?" through prose or ask_user_question. If review rejects it, incorporate the feedback and present again. If the review channel is unavailable or aborted, stay in plan mode and ask the user to switch modes manually; do not proceed with implementation.
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+          - id: delegation
+            name: cordis:group
+            group: true
+            isolate:
+              workflowEngine: true
+            config:
+              - id: tool-subagent-control
+                name: '@deepseek-ai/dsh-tool-subagent-control'
+              - id: tool-subagent-list-agents
+                name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
+              - id: tool-subagent
+                name: '@deepseek-ai/dsh-tool-subagent'
+                config:
+                  provider: spawn
+                  toolName: subagent
+                  modelSelectionSettings: true
+                  backgroundMode: continuable
+              - id: tool-subagent-fork
+                name: '@deepseek-ai/dsh-tool-subagent'
+                config:
+                  provider: fork
+                  toolName: subagent_fork
+                  backgroundMode: continuable
+              - id: tool-subagent-codex
+                name: '@deepseek-ai/dsh-tool-subagent'
+                disabled: true
+                config:
+                  provider: codex
+                  toolName: subagent_codex
+                  backgroundMode: one-shot
+                  maxDepth: provider-managed
+              - id: tool-subagent-claude-code
+                name: '@deepseek-ai/dsh-tool-subagent'
+                disabled: true
+                config:
+                  provider: claude-code
+                  toolName: subagent_claude_code
+                  backgroundMode: one-shot
+                  maxDepth: provider-managed
+              - id: workflow-ptc
+                name: '@deepseek-ai/dsh-workflow-ptc'
+                config:
+                  provider: spawn
+              - id: tool-workflow
+                name: '@deepseek-ai/dsh-tool-workflow'
+              - id: tool-ralph
+                name: '@deepseek-ai/dsh-tool-ralph'
+                disabled: true
+                config:
+                  subagentProvider: spawn
+                  maxRounds: 64
+          - id: tool-ask-user
+            name: '@deepseek-ai/dsh-tool-ask-user'
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config:
+              allowParallelInProgress: true
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000
+          - id: present
+            name: '@deepseek-ai/dsh-tool-present'
+          - id: tool-plugin-manager
+            name: '@deepseek-ai/dsh-plugin-manager/tools'
+            disabled: true
+          # ── END: shipped standard preset ──
+
+          # ── this repo: analyze_image (see examples/dsh.md) ──
+          # Bare package name: resolves from the profile, where the plugin was
+          # added with `dsh plugin --profile <p> add link:...`.
+          - id: tool-vision
+            name: 'dsh-plugin-vision'
+            config:
+              backends:
+                fast:
+                  url: http://YOUR_FAST_VISION_HOST:8081/v1/chat/completions
+                  model: your-fast-vlm
+                detailed:
+                  url: http://YOUR_DETAILED_VISION_HOST:8010/v1/chat/completions
+                  model: your-detailed-vlm
+
+# Make it the default preset (the shipped default is `standard`).
+- id: agent-preset-registry
+  config:
+    default: standard-vision

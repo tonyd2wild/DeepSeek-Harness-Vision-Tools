@@ -12,7 +12,8 @@ eyes: keep your text model as the brain, and let a local vision model do the
 *seeing*. Any text model, any vision model, on Mac or Windows/PC.**
 
 > **Requires dsh 0.2.0-rc.1 or newer.** Works in both 0.2 surfaces: the web UI
-> (profile `web`) and DeepSeek's desktop app (profile `desktop`).
+> (profile `web`) and DeepSeek's desktop app (profile `desktop`). The desktop
+> app has no public download yet; it is built from [DeepSeek's source](https://github.com/deepseek-ai/deepseek-harness).
 >
 > **Using dsh 0.1.x?** Use the [`dsh-0.1` tag](https://github.com/tonyd2wild/DeepSeek-Harness-Vision-Tools/tree/dsh-0.1)
 > of this repo. Its instructions (`settings.yaml`, `~/.dsh/.agent-presets/`)
@@ -112,6 +113,9 @@ What the tool registry requires of a tool descriptor (unchanged from 0.1):
   `options.output.render` unconditionally.
 - **Every service the plugin reads off `ctx` must be declared in `inject`.**
   Reading an undeclared one throws `cannot get property "<name>" without inject`.
+- **No `export default`.** dsh's loader uses a module's default export as the
+  plugin when there is one, which silently drops the `name` and `inject`
+  exports beside it.
 
 ---
 
@@ -184,8 +188,7 @@ whose `baseURL` is the proxy (`http://127.0.0.1:8900/v1`) and that declares
 ```bash
 cp -r plugin/vision ~/.dsh/plugins/vision
 cd ~/.dsh/plugins/vision
-# link the harness's OWN dsh-tools, not the npm one (examples/dsh.md, trap 2)
-npm pkg set "dependencies.@deepseek-ai/dsh-tools=link:$(npm root -g)/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tools"
+# installs @deepseek-ai/dsh-tools, pinned to the dsh 0.2 line (examples/dsh.md, trap 2)
 pnpm install --ignore-scripts
 
 # once per profile you use: web = browser UI, desktop = DeepSeek's desktop app
@@ -339,7 +342,7 @@ Full example: **[.env.example](.env.example)**.
 ```
 shim/vision_shim.py        the vision PROXY (door 1), stdlib-only, zero deps
 plugin/vision/index.js     the analyze_image TOOL (door 2)
-plugin/vision/package.json declares the dsh-tools LINK (harness copy, not npm)
+plugin/vision/package.json pins @deepseek-ai/dsh-tools to the dsh 0.2 line (npm latest is stale)
 examples/dsh.md            the real dsh integration guide: both doors, pi-ai config, traps
 examples/cordis.patch.yml  the dsh 0.2 rows: proxy route, preset with analyze_image, default
 examples/AGENTS.md         copy-paste $DSH_HOME/AGENTS.md so the agent knows it isn't multimodal

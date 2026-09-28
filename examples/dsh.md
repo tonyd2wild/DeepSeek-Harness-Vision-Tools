@@ -6,7 +6,8 @@ model ids, and env names for your own.
 Written for **dsh 0.2.0-rc.1+**, where all configuration lives in
 `$DSH_HOME/profiles/<profile>/cordis.patch.yml` (default `$DSH_HOME` is `~/.dsh`).
 Apply every step to each profile you use: `web` for the browser UI, `desktop`
-for DeepSeek's desktop app. For dsh 0.1.x, use this repo's
+for DeepSeek's desktop app (no public download yet; it is built from
+[DeepSeek's source](https://github.com/deepseek-ai/deepseek-harness)). For dsh 0.1.x, use this repo's
 [`dsh-0.1` tag](https://github.com/tonyd2wild/DeepSeek-Harness-Vision-Tools/tree/dsh-0.1).
 
 ## The core problem
@@ -153,13 +154,12 @@ right door for files the agent already knows the path to.
 
 ### 1. Put the plugin somewhere per-profile-addable
 
-Copy `plugin/vision/` to a stable path, e.g. `~/.dsh/plugins/vision`. Point its
-`@deepseek-ai/dsh-tools` dependency at your harness's bundled copy (see
-**trap 2** below for why) and install it:
+Copy `plugin/vision/` to a stable path, e.g. `~/.dsh/plugins/vision`, and install
+its one dependency, `@deepseek-ai/dsh-tools`, which `package.json` pins to the
+dsh 0.2 line (see **trap 2** below for why):
 
 ```sh
 cd ~/.dsh/plugins/vision
-npm pkg set "dependencies.@deepseek-ai/dsh-tools=link:$(npm root -g)/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tools"
 pnpm install --ignore-scripts
 ```
 
@@ -306,16 +306,17 @@ are in **[../autostart/](../autostart/)**:
    `ERR_MODULE_NOT_FOUND`. Always `dsh plugin --profile <p> add link:...`.
 2. **`dsh-tools` version skew.** The plugin imports `defineTool` from
    `@deepseek-ai/dsh-tools`. npm's `latest` tag for that package is still an old
-   generation (`0.0.1-rc.1`) that imports a package that was never published, so a
-   plain install gives you an unusable copy, and any separately installed copy can
-   drift from the harness you actually run. **Link the harness's own bundled copy**
-   (the `npm pkg set ... link:` step above), declared in `package.json` rather than
-   a hand-made junction, so `pnpm install` recreates it and the version stays
-   checkable. Re-run `pnpm install` in the plugin folder after upgrading `dsh`.
+   generation (`0.0.1-rc.1`) that imports a package that was never published, so
+   an unpinned install gives you an unusable copy. `package.json` therefore pins
+   `^0.2.0-rc.1`, the same generation as the harness. If you move `dsh` to a new
+   minor line, move that range with it and re-run `pnpm install`.
 3. **Declare every `ctx` service you read in `inject`.** Under 0.2, reading a
    service the plugin did not declare throws
-   `cannot get property "<name>" without inject`, and an `inject` naming a service
-   that never appears keeps the plugin from applying at all.
+   `cannot get property "<name>" without inject`. An `inject` entry naming a
+   service that never appears keeps the plugin from applying at all, silently:
+   `{ optional: ["tools"] }` is read as a required service called "optional".
+   And do not add an `export default`: the loader then uses it as the plugin and
+   ignores the `name` / `inject` exports.
 4. **Absolute Windows paths work in a PRESET but not in a profile patch.** The
    preset loader converts an absolute path to a `file:` URL before import, so
    `C:/Users/.../index.js` is valid in a preset row. The **host-plane** loader does
@@ -347,11 +348,12 @@ listener on `8900`.
 
 ## Residual risk
 
-- **Sandbox note (tool).** The reference `index.js` reads images through
-  **`ctx.fs`**, the sandbox-safe path that enforces the workspace boundary and
-  approval policy. If your plugin surface only exposes `readFileSync`, understand
-  that it **bypasses the sandbox** (the model could then read any file on disk
-  through `analyze_image`), and gate the tool before running unattended.
+- **Sandbox note (tool).** `analyze_image` reads the image with a plain
+  `node:fs` read, because dsh 0.2's `ctx.fs` service is bounded text I/O and
+  cannot return image bytes. That read **bypasses the sandbox**: it ignores the
+  workspace boundary and the file-approval policy, so the model can have any
+  readable image file sent to your vision endpoint. The tool only accepts image
+  extensions and caps size at 20 MB, but gate it before running unattended.
 - **The describer is the ceiling.** `fast` (and the proxy's small vision model) is
   right for colours, layout, and coarse content; use `detailed` or a larger
   `--vision-model` for small text and fine detail.
